@@ -71,8 +71,9 @@ func handleClient(conn net.Conn) {
 			sendBuffer(conn, bufRes)
 		case 2:
 			fmt.Fprintf(os.Stderr, "Exit!\n")
-			response := wrapCommonHeaders(request, []byte{0x12}, payload)
+			bufRes := wrapCommonHeaders(request, []byte{0x12}, []byte{})
 			sendBuffer(conn, bufRes)
+			return
 		}
 	}
 }
