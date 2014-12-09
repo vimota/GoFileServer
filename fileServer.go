@@ -101,6 +101,11 @@ func handleClient(conn net.Conn) {
 			bufRes = wrapCommonHeaders(request, []byte{0x12}, []byte{})
 			sendBuffer(conn, bufRes)
 			return
+		case 4:
+			// GET_FILE_IDS
+			fmt.Fprintf(os.Stderr, "GetFileIds\n")
+			bufRes = respondGetFileIds(request)
+			sendBuffer(conn, bufRes)
 		case 6:
 			// ALLOCATE_FILE
 			fileId, success := allocateFile(request)
@@ -118,7 +123,7 @@ func storeFiles() {
 
 	fmt.Fprintf(os.Stderr, "filesStruct: %+v\n", f)
 	fmt.Fprintf(os.Stderr, "filesStruct marshalled: %v\n", b)
-	err = ioutil.WriteFile("filesDb.txt", b, 0777)
+	err = ioutil.WriteFile("filesDb.json", b, 0777)
 	check(err)
 	files <- f
 }
@@ -132,10 +137,10 @@ func loadFiles() {
 		return
 	}
 
-	b, err := ioutil.ReadFile("filesDb.txt")
+	b, err := ioutil.ReadFile("filesDb.json")
 	if os.IsNotExist(err) {
 		// if file does not exist create file
-		_, err := os.Create("filesDb.txt")
+		_, err := os.Create("filesDb.json")
 		if err != nil {
 			panic(err)
 		}
@@ -258,6 +263,58 @@ func respondAllocateFile(request *Request, fileId uint32, success bool) []byte {
 	payload = append(payload, fileIdBytes...)
 	// add common headers
 	response := wrapCommonHeaders(request, []byte{0x16}, payload)
+
+	//return
+	return response
+}
+
+func respondGetFileIds(request *Request) []byte {
+	// make payload
+	var payload []byte
+
+	f := <-files
+	// release files data
+	// in case something wrong here doesn't
+	// block whole program
+	files <- f
+
+	payloadBuf := new(bytes.Buffer)
+	// numberOfFiles
+	err := binary.Write(payloadBuf, binary.BigEndian, uint32(len(f)))
+	if err != nil {
+		fmt.Println("binary.Write failed:", err)
+	}
+
+	// FILEDESCRIPTOR_STRUCT per file
+	for _, file := range f {
+		err = binary.Write(payloadBuf, binary.BigEndian, file.FileId)
+		if err != nil {
+			fmt.Println("FileId binary.Write failed:", err)
+		}
+
+		err = binary.Write(payloadBuf, binary.BigEndian, file.FileSize)
+		if err != nil {
+			fmt.Println("FileSize binary.Write failed:", err)
+		}
+
+		err = binary.Write(payloadBuf, binary.BigEndian, file.RelativePathLength)
+		if err != nil {
+			fmt.Println("RelativePathLength binary.Write failed:", err)
+		}
+
+		_, err = payloadBuf.WriteString(file.RelativePath)
+		if err != nil {
+			fmt.Println("RelativePath binary.Write failed:", err)
+		}
+	}
+
+	// // prepend total length data
+	totalLength := make([]byte, 4)
+	binary.BigEndian.PutUint32(totalLength, uint32(len(payload)))
+	payload = append(totalLength, payloadBuf.Bytes()...)
+
+	// add common headers
+	response := wrapCommonHeaders(request, []byte{0x14}, payload)
 
 	//return
 	return response

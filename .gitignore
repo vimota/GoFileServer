@@ -2,3 +2,4 @@ testServer.go
 testServerBetter.go
 relative-*
 storagePath/**
+filesDb.json
