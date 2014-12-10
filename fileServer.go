@@ -134,6 +134,10 @@ func handleClient(conn net.Conn) {
 			// WRITE_FILE_CHUNK
 			bufRes = respondWriteFileChunk(request)
 			sendBuffer(conn, bufRes)
+		case 8:
+			// READ_FILE_CHUNK
+			bufRes = respondReadFileChunk(request)
+			sendBuffer(conn, bufRes)
 		case 9:
 			// DELETE_FILE
 			fmt.Fprintf(os.Stderr, "DeleteFile\n")
@@ -486,7 +490,7 @@ func respondWriteFileChunk(request *Request) []byte {
 	// fmt.Println("start: ", start)
 	// fmt.Println("end: ", end)
 	// fmt.Println("length: ", length)
-	// fmt.Println("data: ", data)
+	fmt.Println("data: ", data)
 
 	f := <-files
 	fileInfo, ok := f[strconv.Itoa(int(fileId))]
@@ -516,6 +520,59 @@ func respondWriteFileChunk(request *Request) []byte {
 
 	files <- f
 	response = wrapCommonHeaders(request, []byte{0x17}, []byte{0x01}, request.payload[0:28])
+	return response
+
+}
+
+func respondReadFileChunk(request *Request) []byte {
+	var fileId uint32
+	var start, end, length uint64
+	var response []byte
+	binary.Read(bytes.NewReader(request.payload[0:4]), binary.BigEndian, &fileId)
+	binary.Read(bytes.NewReader(request.payload[4:12]), binary.BigEndian, &start)
+	binary.Read(bytes.NewReader(request.payload[12:20]), binary.BigEndian, &end)
+	binary.Read(bytes.NewReader(request.payload[20:28]), binary.BigEndian, &length)
+
+	fmt.Println("file id: ", fileId)
+	fmt.Println("start: ", start)
+	fmt.Println("end: ", end)
+	fmt.Println("length: ", length)
+
+	f := <-files
+	// doesn't need to block
+	files <- f
+	fileInfo, ok := f[strconv.Itoa(int(fileId))]
+	if !ok {
+		// fileId not found in db
+		response = wrapCommonHeaders(request, []byte{0x18}, []byte{0x00}, request.payload[0:28])
+		return response
+	}
+
+	// Check if chunk has been written
+	for _, chunk := range fileInfo.Chunks {
+		if chunk.Start == start && length <= chunk.Length {
+			// Chunk has been written to
+
+			fileData, err := ioutil.ReadFile(fileInfo.AbsolutePath)
+			if err != nil {
+				fmt.Println("Reading file for chunk failed:", err)
+			}
+
+			var payload []byte
+			payload = append(request.payload[0:28], fileData[start:start+length]...)
+
+			fmt.Println("Chunk Requested: ", fileData[start:start+length])
+			fmt.Println("DataLength: ", len(fileData[start:start+length]))
+			fmt.Println("Payload: ", payload)
+			fmt.Println("Payload length: ", len(payload))
+
+			response = wrapCommonHeaders(request, []byte{0x18}, []byte{0x01}, payload)
+			return response
+		}
+	}
+
+	// if chunk wasn't found above
+	response = wrapCommonHeaders(request, []byte{0x18}, []byte{0x00}, request.payload[0:28])
 	return response
 
 }
